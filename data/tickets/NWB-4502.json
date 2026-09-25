@@ -1,8 +1,8 @@
 {
   "ticket_id": "NWB-4502",
   "client_id": "NWB",
-  "subject": "First statement for newly opened accounts is failing to generate",
-  "body": "Statement generation is erroring for accounts opened part way through a cycle. The job log shows a failure resolving the cycle dates and nothing is produced, so the customer receives no first statement at all. Existing accounts are unaffected.\n\nOur operations team believes the first statement should cover from the account opening date to the next cycle close on the 15th. Someone else here thinks accounts opened within a few days of the anchor should roll into the following cycle so the customer is not sent a two-day statement, which is how our previous provider behaved.\n\nPlease advise which behaviour is correct and when it can be fixed.",
+  "subject": "First statement period is too short for accounts opened just before the 15th",
+  "body": "Query from our onboarding team about the first statement on newly opened accounts. Statements are generating and the figures are right, so nothing is broken, but we disagree with the period being used.\n\nAn account opened on the 13th receives a first statement covering the 13th to the 15th - two days, usually with one or two transactions on it. Our onboarding team expected that an account opened within a few days of the anchor would roll into the following cycle, so the first statement would run from the opening date through to the 15th of the next month. That is how our previous provider behaved and it is what our branch staff describe to customers at account opening.\n\nWe cannot find anything in the signed-off requirements that settles this either way. Please confirm which behaviour is intended, and if the current one is intended, whether it can be changed.",
   "product_area": "cycles",
   "submitted_at": "2026-03-25T11:05:00Z",
   "reporter_role": "Client Ops Manager"

@@ -156,6 +156,33 @@ def test_fee_engine_is_a_decoy_not_a_defect(conn, known_params):
     assert "FEE_SALARY_CREDIT_MIN" in custom - core
 
 
+def test_first_cycle_period_is_unspecified_but_does_not_crash(conn):
+    """Ticket NWB-4502 is a NEEDS_INFO, and it has to earn that.
+
+    The code makes a choice the spec never settles: with no previous close on file it
+    falls back to the account opening date, which hands a customer opened on the 13th a
+    two-day first statement. Nothing errors, so there is no defect to point at, and
+    SON-003 says nothing about the first cycle, so there is no requirement to point at
+    either. The only honest verdict is to ask.
+    """
+    son = (PROJECT_ROOT / "data/sons/SON-003-statement-cycle-dates.md").read_text(encoding="utf-8").lower()
+    for phrase in ["first cycle", "first statement", "newly opened", "account opening"]:
+        assert phrase not in son, f"SON-003 now covers {phrase!r}; NWB-4502 is no longer NEEDS_INFO"
+
+    rows = conn.execute(
+        "SELECT * FROM code_snippets WHERE function_name = 'resolve_statement_cycle_dates'"
+    ).fetchall()
+    assert len(rows) == 2
+    for row in rows:
+        lines = (PROJECT_ROOT / row["path"]).read_text(encoding="utf-8").splitlines()
+        window = "\n".join(lines[row["start_line"] - 1 : row["end_line"]])
+        assert "opened_on" in window, f"{row['layer']} must fall back to the opening date"
+        assert "raise" not in window, (
+            f"{row['layer']} must not error on a first cycle — a job that produces nothing "
+            "is a defect regardless of what the spec says, which would make the ticket a BUG"
+        )
+
+
 def test_no_tier_or_age_waiver_parameter_exists(conn):
     """SON-002 5.1 and 5.2 put these out of scope, so the CR case needs them absent."""
     # Note: underscore is a single-character wildcard in LIKE, so patterns here are kept

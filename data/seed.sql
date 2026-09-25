@@ -258,7 +258,7 @@ VALUES
      'Platform default maintenance fee waiver evaluation. Average balance condition only.'),
     ('NWB', 'custom', 'calculate_monthly_fee_waiver',  'data/code/custom/nwb_fee_engine.py',        15, 38, 'python',
      'Northwind Bank override adding the SON-002 3.2.1(b) salary credit waiver condition.'),
-    (NULL,  'core',   'resolve_statement_cycle_dates', 'data/code/core/cycle_calendar.py',          13, 41, 'python',
+    (NULL,  'core',   'resolve_statement_cycle_dates', 'data/code/core/cycle_calendar.py',          13, 45, 'python',
      'Platform default cycle date derivation. Weekends only in the non-working-day test.'),
-    ('NWB', 'custom', 'resolve_statement_cycle_dates', 'data/code/custom/nwb_cycle_calendar.py',    26, 45, 'python',
+    ('NWB', 'custom', 'resolve_statement_cycle_dates', 'data/code/custom/nwb_cycle_calendar.py',    26, 49, 'python',
      'Northwind Bank override adding the England and Wales bank holiday calendar to the roll.');

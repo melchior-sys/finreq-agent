@@ -34,10 +34,14 @@ def resolve_statement_cycle_dates(account: dict[str, Any], as_of: date, config: 
 
     previous_close = account.get("last_cycle_close")
     if previous_close is None:
-        raise ValueError("no previous cycle close on file for account")
+        # First cycle of a newly opened account: platform fallback, carried across
+        # unchanged. NWB has never specified its own behaviour here.
+        cycle_start = account["opened_on"]
+    else:
+        cycle_start = previous_close + timedelta(days=1)
 
     return {
-        "cycle_start": previous_close + timedelta(days=1),
+        "cycle_start": cycle_start,
         "cycle_end": close,
         "timezone": tz_name,
         "cutoff": "23:59:59.999",

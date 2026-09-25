@@ -1,9 +1,16 @@
-# Slice 1 — synthetic data + shared models
+# Python 3.11+. Verified on Windows 11 with CPython 3.14.6.
+#
+# Toolchain note: the retriever uses fastembed, which runs its models through
+# onnxruntime rather than torch. onnxruntime 1.30.0 publishes a cp314 Windows wheel
+# and loads cleanly (CPUExecutionProvider), so no downgrade to 3.12 is needed and no
+# torch install is involved. If a future onnxruntime drops a wheel for the installed
+# interpreter, pin the venv to the newest Python that has one rather than adding torch.
+
 pydantic>=2.6
 pytest>=8.0
+fastembed>=0.8          # slice 2 — ONNX embeddings, no torch dependency
 
 # Added in later slices:
-#   fastembed>=0.3      (slice 2 — ONNX embeddings, no torch dependency)
 #   anthropic>=0.40     (slice 4 — agent loop)
 #   fastapi>=0.110      (slice 6 — POST /triage)
 #   uvicorn>=0.29       (slice 6)

@@ -176,6 +176,9 @@ def render(results: dict, table: list[dict], chosen: dict, prefix_delta: dict) -
         + ("(the two bands overlap)" if min_rel < max_irr else "(cleanly separated)"),
         f"- **Chosen floor: {chosen['floor']:.2f}** — strict recall {chosen['recall']:.0%}, "
         f"document recall {chosen['doc_recall']:.0%}, false admits {chosen['false_admit']:.0%}",
+        f"- **Floor margin: {chosen['floor'] - max_irr:+.4f}** — how far the floor sits above the "
+        "best-scoring irrelevant query. Thin margins mean one new off-topic query could start "
+        "clearing the floor, so this is tracked rather than assumed.",
         "",
         "The bands overlap, so no floor separates relevant from irrelevant perfectly and "
         "the choice is a trade, not an optimum. It is made in favour of zero false "
@@ -259,6 +262,18 @@ def render(results: dict, table: list[dict], chosen: dict, prefix_delta: dict) -
         f"{prefix_delta['with']['max_irr']:.4f} | {prefix_delta['with']['separation']:+.4f} |",
         f"| Without prefix | {prefix_delta['without']['mean_rel']:.4f} | "
         f"{prefix_delta['without']['max_irr']:.4f} | {prefix_delta['without']['separation']:+.4f} |",
+        "",
+        "## Planned for slice 5",
+        "",
+        "- **Held-out queries.** Add roughly ten relevant and ten irrelevant queries that "
+        "were not used to pick this floor, and report their numbers separately. The floor "
+        "above is fitted to the set on this page, so those figures are training accuracy: "
+        "they say how well the threshold describes the queries it was chosen from, not how "
+        "it behaves on a query it has never seen.",
+        "- **Floor margin as a tracked metric.** Report "
+        f"`floor - max irrelevant score` on every eval run (currently "
+        f"{chosen['floor'] - max_irr:+.4f}). It is the early warning: it shrinks silently as "
+        "documents are added, and it reaches zero before any recall number moves.",
         "",
     ]
     return "\n".join(lines) + "\n"

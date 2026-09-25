@@ -12,6 +12,7 @@ BGE cosine scores occupy a narrow high band: unrelated text still scores around 
 - Highest score among irrelevant queries: **0.6273**
 - Separation: **-0.0408** (the two bands overlap)
 - **Chosen floor: 0.63** — strict recall 83%, document recall 100%, false admits 0%
+- **Floor margin: +0.0027** — how far the floor sits above the best-scoring irrelevant query. Thin margins mean one new off-topic query could start clearing the floor, so this is tracked rather than assumed.
 
 The bands overlap, so no floor separates relevant from irrelevant perfectly and the choice is a trade, not an optimum. It is made in favour of zero false admits: a chunk above the floor reaches the agent as a retrieved requirement, and the evidence gate will accept a verbatim quote from it, so an off-topic chunk is a path to a confidently wrong verdict that passes every check. A miss degrades to NEEDS_INFO, which is recoverable.
 
@@ -108,4 +109,9 @@ Both misses are questions the definitions section of the same document also answ
 |---|---:|---:|---:|
 | With prefix | 0.7297 | 0.6273 | -0.0408 |
 | Without prefix | 0.7258 | 0.6663 | -0.0946 |
+
+## Planned for slice 5
+
+- **Held-out queries.** Add roughly ten relevant and ten irrelevant queries that were not used to pick this floor, and report their numbers separately. The floor above is fitted to the set on this page, so those figures are training accuracy: they say how well the threshold describes the queries it was chosen from, not how it behaves on a query it has never seen.
+- **Floor margin as a tracked metric.** Report `floor - max irrelevant score` on every eval run (currently +0.0027). It is the early warning: it shrinks silently as documents are added, and it reaches zero before any recall number moves.
 

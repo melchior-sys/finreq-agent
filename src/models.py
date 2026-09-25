@@ -87,9 +87,15 @@ def json_unescape(text: str) -> str:
         return text
     # Normalise quoting, then let the JSON decoder do the unescaping. An invalid
     # escape sequence is not an error here — the text is simply left alone.
-    candidate = '"' + text.replace('\\"', '"').replace('"', '\\"') + '"'
+    candidate = text.replace('\\"', '"').replace('"', '\\"')
+    # Raw control characters are illegal inside a JSON string literal, so a
+    # pretty-printed tool result — which is full of real newlines — would fail to
+    # decode and silently come back still escaped. Escaping them first means the
+    # whole of a serialised tool result normalises the same way a fragment does.
+    for raw, escaped in (("\r", "\\r"), ("\n", "\\n"), ("\t", "\\t")):
+        candidate = candidate.replace(raw, escaped)
     try:
-        decoded = json.loads(candidate)
+        decoded = json.loads(f'"{candidate}"')
     except json.JSONDecodeError:
         return text
     return decoded if isinstance(decoded, str) else text

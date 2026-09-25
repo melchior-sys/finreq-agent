@@ -222,6 +222,26 @@ def test_normalisation(raw, expected):
     assert normalise_for_match(raw) == expected
 
 
+def test_grounding_works_against_a_pretty_printed_tool_result():
+    """Regression.
+
+    Tool results reach the model as pretty-printed JSON, which is full of real
+    newlines. A raw newline is illegal inside a JSON string literal, so the attempt
+    to unescape a whole result used to raise, get swallowed, and return the text
+    still escaped — at which case every genuine quote from a code snippet looked
+    invented and the evidence gate rejected correct verdicts.
+    """
+    import json as _json
+
+    payload = _json.dumps(
+        {"snippet": 'exclude = config.get_bool("FLAG", default=True)\nreturn exclude'},
+        ensure_ascii=False,
+        indent=2,
+    )
+    assert "\\n" in payload and '\\"' in payload  # the shape that used to break it
+    assert is_grounded('config.get_bool("FLAG", default=True)', [payload])
+
+
 def test_grounding_survives_json_escaping_and_rewrapping():
     tool_output = (
         "3.2.1 Authorisations in DROPPED or EXPIRED state MUST NOT appear as statement\n"

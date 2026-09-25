@@ -1,0 +1,9 @@
+{
+  "ticket_id": "NWB-4488",
+  "client_id": "NWB",
+  "subject": "Monthly fee not being waived for our over-65 customers",
+  "body": "Our retail team has been promoting fee-free banking for customers aged 65 and over since the start of the year. We are now getting complaints because the four pound monthly maintenance fee is still being charged to these accounts at cycle close.\n\nBalance-based and salary-credit waivers are both working correctly, so the waiver engine itself is clearly running. We assume there is a configuration switch for the senior customer waiver that has not been enabled on our environment - possibly something like FEE_WAIVER_SENIOR_TIER_ENABLED. Please enable it, or tell us what the correct parameter is.\n\nThis is causing reputational damage in branch so we would like it resolved in the current release if possible.",
+  "product_area": "fees",
+  "submitted_at": "2026-03-23T14:41:00Z",
+  "reporter_role": "Client Product Manager"
+}

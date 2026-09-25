@@ -1,0 +1,9 @@
+# Slice 1 — synthetic data + shared models
+pydantic>=2.6
+pytest>=8.0
+
+# Added in later slices:
+#   fastembed>=0.3      (slice 2 — ONNX embeddings, no torch dependency)
+#   anthropic>=0.40     (slice 4 — agent loop)
+#   fastapi>=0.110      (slice 6 — POST /triage)
+#   uvicorn>=0.29       (slice 6)

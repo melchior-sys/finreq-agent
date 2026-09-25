@@ -1,0 +1,9 @@
+{
+  "ticket_id": "NWB-4502",
+  "client_id": "NWB",
+  "subject": "First statement for newly opened accounts is failing to generate",
+  "body": "Statement generation is erroring for accounts opened part way through a cycle. The job log shows a failure resolving the cycle dates and nothing is produced, so the customer receives no first statement at all. Existing accounts are unaffected.\n\nOur operations team believes the first statement should cover from the account opening date to the next cycle close on the 15th. Someone else here thinks accounts opened within a few days of the anchor should roll into the following cycle so the customer is not sent a two-day statement, which is how our previous provider behaved.\n\nPlease advise which behaviour is correct and when it can be fixed.",
+  "product_area": "cycles",
+  "submitted_at": "2026-03-25T11:05:00Z",
+  "reporter_role": "Client Ops Manager"
+}

@@ -1,0 +1,9 @@
+{
+  "ticket_id": "NWB-4471",
+  "client_id": "NWB",
+  "subject": "Cancelled ATM withdrawals still printing on customer statements",
+  "body": "Raised by our branch network. A cardholder (card ending 4417) has called twice about the February to March statement. Four ATM withdrawals appear on the statement that never actually left the account - the cash was never dispensed and the hold dropped off a few days later. The customer reads them as duplicate debits and we have had to issue a manual explanation letter both times.\n\nWe checked with our platform team and the exclusion setting for dropped authorisations is switched on at our end, and has been since go-live. Expired authorisations do not appear, so something is clearly treating the two differently.\n\nCan you confirm whether this is behaving as designed? If it is, we will need to understand why, because our signed-off requirement says these should never be printed.",
+  "product_area": "statements",
+  "submitted_at": "2026-03-19T09:12:00Z",
+  "reporter_role": "Client Ops Analyst"
+}

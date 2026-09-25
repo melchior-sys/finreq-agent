@@ -1,0 +1,5 @@
+.env
+traces/
+__pycache__/
+.venv/
+*.sqlite

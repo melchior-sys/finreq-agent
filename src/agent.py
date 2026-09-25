@@ -41,6 +41,7 @@ from src.models import (  # noqa: E402
     EvidenceGateReport,
     StopReason,
     Ticket,
+    ToolObservation,
     TriageResult,
     Verdict,
     VerdictSubmission,
@@ -282,7 +283,11 @@ class TriageAgent:
 
         state.seen_calls[key] = result
         payload = tools_module.serialise(result)
-        state.tool_outputs.append(payload)
+        # Recorded with its provenance: the gate checks each citation against the
+        # specific result its ref points at, not against everything the run has seen.
+        state.observations.append(
+            ToolObservation.of(call.name, result, payload, arguments=call.arguments)
+        )
         tracer.event("tool_result", tool=call.name, status=result.get("status"),
                      is_error=is_error, chars=len(payload), result=result)
         return _tool_result_block(call.id, payload, is_error=is_error)
@@ -305,7 +310,7 @@ class TriageAgent:
                 is_error=True,
             )
 
-        gate = check_evidence_gate(submission, state.tool_outputs)
+        gate = check_evidence_gate(submission, state.observations)
         if gate.passed:
             state.submission, state.gate = submission, gate
             result = TriageResult.from_submission(
@@ -389,10 +394,10 @@ class TriageAgent:
                 draft_reply="We are still looking into this and will come back to you shortly.",
             )
 
-        gate = check_evidence_gate(submission, state.tool_outputs)
+        gate = check_evidence_gate(submission, state.observations)
         if not gate.passed:
             submission = _downgrade(submission, gate, detail)
-            gate = check_evidence_gate(submission, state.tool_outputs)
+            gate = check_evidence_gate(submission, state.observations)
             tracer.event("guard_tripped", guard="downgraded_to_needs_info",
                          detail="; ".join(gate.failures) or detail)
 
@@ -419,14 +424,14 @@ class _RunState:
     no_progress: int = 0
     gate_failures: int = 0
     seen_calls: dict[tuple[str, str], dict] = None  # type: ignore[assignment]
-    tool_outputs: list[str] = None  # type: ignore[assignment]
+    observations: list[ToolObservation] = None  # type: ignore[assignment]
     submission: VerdictSubmission | None = None
     gate: EvidenceGateReport | None = None
     ticket: Ticket | None = None
 
     def __post_init__(self) -> None:
         self.seen_calls = {}
-        self.tool_outputs = []
+        self.observations = []
 
 
 def _assistant_blocks(response: LLMResponse) -> list[dict[str, Any]]:

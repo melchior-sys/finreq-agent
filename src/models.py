@@ -26,7 +26,7 @@ import unicodedata
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -197,6 +197,74 @@ class VerdictSubmission(BaseModel):
     draft_reply: str = Field(description="Client-facing reply. No internal file paths.")
 
 
+class ToolObservation(BaseModel):
+    """One tool result, with the provenance needed to check a citation against it.
+
+    The gate needs more than the text: it needs to know which tool produced it and
+    what that call was about, so a citation can be checked against the result it
+    actually claims to come from rather than against everything the run has seen.
+    """
+
+    tool: str
+    arguments: dict = Field(default_factory=dict)
+    text: str = Field(description="The serialised result, exactly as the model saw it.")
+    result: dict = Field(default_factory=dict, description="The same result, unserialised.")
+
+    @classmethod
+    def of(cls, tool: str, result: dict, text: str, arguments: dict | None = None) -> "ToolObservation":
+        return cls(tool=tool, arguments=arguments or {}, text=text, result=result)
+
+
+# Which tool is allowed to be the source of each kind of evidence. A config claim
+# that cannot be traced to a configuration lookup is not a config claim.
+EVIDENCE_SOURCE_TOOL: dict[EvidenceKind, str] = {
+    EvidenceKind.SON: "search_son",
+    EvidenceKind.CONFIG: "get_config_param",
+    EvidenceKind.CODE: "compare_core_vs_custom",
+    EvidenceKind.DATA: "get_auth_records",
+}
+
+
+def _ref_identifies(kind: EvidenceKind, ref: str, observation: ToolObservation) -> bool:
+    """Does this observation answer the thing the citation's `ref` points at?
+
+    Per kind, because each tool identifies its subject differently. Where a kind has
+    no reliable identifier in the ref, this returns True and the check degrades to
+    "came from the right tool" — still strictly stronger than the old any-result rule.
+    """
+    result = observation.result
+    ref = ref.strip()
+
+    if kind is EvidenceKind.SON:
+        # A rule is often cited more precisely than it is chunked: the retriever
+        # returns SON-001#3.2, and the model cites the sub-clause SON-001#3.2.1 that
+        # it actually relied on. That is a better citation, not a worse one, so a ref
+        # below the chunk it came from counts.
+        for chunk in result.get("chunks", []):
+            chunk_id = str(chunk.get("chunk_id", ""))
+            if chunk_id and (ref == chunk_id or ref.startswith(f"{chunk_id}.")):
+                return True
+        return False
+
+    if kind is EvidenceKind.CONFIG:
+        wanted = ref.upper()
+        names = {str(result.get("param", {}).get("name", "")).upper()}
+        names |= {str(c.get("name", "")).upper() for c in result.get("candidates", [])}
+        if result.get("status") == "not_found":
+            # An absent parameter is evidence too, and its only identifier is the
+            # name that was searched for.
+            names.add(str(result.get("query", "")).upper())
+        return wanted in names - {""}
+
+    if kind is EvidenceKind.CODE:
+        path = ref.split(":", 1)[0].replace("\\", "/").strip()
+        layers = [result.get("core") or {}, result.get("custom") or {}]
+        known = {str(layer.get("path", "")).replace("\\", "/") for layer in layers}
+        return bool(path) and path in known - {""}
+
+    return True  # data: the ref is a free-text description of a filter
+
+
 class EvidenceGateReport(BaseModel):
     """Result of checking a submission against the evidence rules. All machine-checked."""
 
@@ -259,24 +327,62 @@ class TriageResult(BaseModel):
 MIN_EVIDENCE_FOR_DECISION = 2
 
 
+def check_citation(evidence: Evidence, observations: Sequence[ToolObservation]) -> str | None:
+    """Check one citation against the specific result it claims to come from.
+
+    Returns None when the citation holds, or a failure message naming what went
+    wrong. Three ways to fail, and they are worth distinguishing: the run never made
+    the call the citation implies, the call was made but about something else, or the
+    call was made about the right thing and the quote is not in it.
+
+    Checking against *any* tool result would leave the obvious hole open: a
+    configuration claim quoting a value that appeared in some other parameter's
+    lookup reads as fully grounded while being about the wrong parameter, and it is
+    exactly the kind of error that survives review because every word of it is real.
+    """
+    expected_tool = EVIDENCE_SOURCE_TOOL[evidence.kind]
+    from_tool = [obs for obs in observations if obs.tool == expected_tool]
+    if not from_tool:
+        return (
+            f"{evidence.kind.value} evidence cites {evidence.ref!r}, but this run never "
+            f"called {expected_tool}."
+        )
+
+    about_ref = [obs for obs in from_tool if _ref_identifies(evidence.kind, evidence.ref, obs)]
+    if not about_ref:
+        return (
+            f"No {expected_tool} result in this run is about {evidence.ref!r}; the quote may be "
+            "real but it is attributed to the wrong source."
+        )
+
+    if not any(is_grounded(evidence.quote, [obs.text]) for obs in about_ref):
+        excerpt = evidence.quote[:80] + ("..." if len(evidence.quote) > 80 else "")
+        return f"Quote not found in the {expected_tool} result for {evidence.ref!r}: {excerpt!r}"
+
+    return None
+
+
 def check_evidence_gate(
-    submission: VerdictSubmission, tool_outputs: Iterable[str]
+    submission: VerdictSubmission, observations: Iterable[ToolObservation]
 ) -> EvidenceGateReport:
     """Validate a submission against the evidence rules.
 
     A BUG or CR verdict must rest on the spec *and* on something observed: at least
     two citations, at least one of them a SON section and at least one of them not.
     A verdict resting only on the spec is a reading, not a triage. NEEDS_INFO instead
-    has to name what is missing. Every quote must be traceable to a tool result.
+    has to name what is missing. Every quote must be traceable to the particular tool
+    result its `ref` points at — see `check_citation`.
     """
-    outputs = list(tool_outputs)
+    seen = list(observations)
     failures: list[str] = []
 
     son_citations = sum(1 for e in submission.evidence if e.kind is EvidenceKind.SON)
     corroborating_kinds = sorted(
         {e.kind.value for e in submission.evidence if e.kind is not EvidenceKind.SON}
     )
-    ungrounded = [e.quote for e in submission.evidence if not is_grounded(e.quote, outputs)]
+
+    citation_failures = [(e, check_citation(e, seen)) for e in submission.evidence]
+    ungrounded = [e.quote for e, problem in citation_failures if problem is not None]
 
     if submission.verdict in (Verdict.BUG, Verdict.CR):
         if len(submission.evidence) < MIN_EVIDENCE_FOR_DECISION:
@@ -298,9 +404,7 @@ def check_evidence_gate(
         if not submission.missing_info:
             failures.append("NEEDS_INFO must list at least one specific question for the client.")
 
-    for quote in ungrounded:
-        excerpt = quote[:80] + ("..." if len(quote) > 80 else "")
-        failures.append(f"Quote not found in any tool result: {excerpt!r}")
+    failures.extend(problem for _, problem in citation_failures if problem is not None)
 
     return EvidenceGateReport(
         passed=not failures,

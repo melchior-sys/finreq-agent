@@ -30,8 +30,10 @@ from src.models import (  # noqa: E402
     EvidenceKind,
     StopReason,
     Ticket,
+    ToolObservation,
     Verdict,
     VerdictSubmission,
+    check_citation,
     check_evidence_gate,
     compute_confidence,
     is_grounded,
@@ -278,53 +280,162 @@ def test_grounding_survives_json_escaping_and_rewrapping():
 # ------------------------------------------------------- gate and confidence
 
 
-def _evidence(kind: EvidenceKind, quote: str) -> Evidence:
-    return Evidence(kind=kind, ref="ref", quote=quote, why_it_matters="because")
+SON_OBS = ToolObservation.of(
+    "search_son",
+    {"chunks": [{"chunk_id": "SON-001#3.2", "text": "MUST NOT appear as statement lines"}]},
+    '{"chunks": [{"chunk_id": "SON-001#3.2", "text": "MUST NOT appear as statement lines"}]}',
+)
+DROPPED_OBS = ToolObservation.of(
+    "get_config_param",
+    {"param": {"name": "STMT_EXCLUDE_DROPPED_AUTHS", "value": "true"}},
+    '{"param": {"name": "STMT_EXCLUDE_DROPPED_AUTHS", "value": "true"}}',
+)
+ANCHOR_OBS = ToolObservation.of(
+    "get_config_param",
+    {"param": {"name": "STMT_CYCLE_ANCHOR_DAY", "value": "15"}},
+    '{"param": {"name": "STMT_CYCLE_ANCHOR_DAY", "value": "15"}}',
+)
+CODE_OBS = ToolObservation.of(
+    "compare_core_vs_custom",
+    {
+        "core": {"path": "data/code/core/statement_builder.py", "snippet": "exclude_dropped = x"},
+        "custom": {"path": "data/code/custom/nwb_statement_builder.py",
+                   "snippet": "exclude_expired = y"},
+    },
+    '{"core": {"path": "data/code/core/statement_builder.py", "snippet": "exclude_dropped = x"}, '
+    '"custom": {"path": "data/code/custom/nwb_statement_builder.py", '
+    '"snippet": "exclude_expired = y"}}',
+)
+DATA_OBS = ToolObservation.of(
+    "get_auth_records",
+    {"count": 4, "aggregates": {"by_status": {"DROPPED": 4}}},
+    '{"count": 4, "aggregates": {"by_status": {"DROPPED": 4}}}',
+)
+ALL_OBS = [SON_OBS, DROPPED_OBS, ANCHOR_OBS, CODE_OBS, DATA_OBS]
+
+
+def _evidence(kind: EvidenceKind, ref: str, quote: str) -> Evidence:
+    return Evidence(kind=kind, ref=ref, quote=quote, why_it_matters="because")
+
+
+SON_EV = _evidence(EvidenceKind.SON, "SON-001#3.2", "MUST NOT appear as statement lines")
+CONFIG_EV = _evidence(EvidenceKind.CONFIG, "STMT_EXCLUDE_DROPPED_AUTHS", '"value": "true"')
+DATA_EV = _evidence(EvidenceKind.DATA, "card 4417 ATM", '"DROPPED": 4')
 
 
 def test_gate_rejects_a_bug_verdict_with_only_a_son_citation():
     submission = VerdictSubmission(
-        verdict=Verdict.BUG,
-        rationale="r",
-        evidence=[_evidence(EvidenceKind.SON, "MUST NOT appear")],
-        draft_reply="d",
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV], draft_reply="d"
     )
-    gate = check_evidence_gate(submission, ["MUST NOT appear"])
+    gate = check_evidence_gate(submission, ALL_OBS)
     assert not gate.passed
     assert any("non-SON" in f for f in gate.failures)
 
 
 def test_gate_flags_an_invented_quote():
-    submission = VerdictSubmission(
-        verdict=Verdict.BUG,
-        rationale="r",
-        evidence=[
-            _evidence(EvidenceKind.SON, "MUST NOT appear"),
-            _evidence(EvidenceKind.CODE, "this text was never returned by a tool"),
-        ],
-        draft_reply="d",
+    invented = _evidence(
+        EvidenceKind.CODE,
+        "data/code/core/statement_builder.py",
+        "this text was never returned by a tool",
     )
-    gate = check_evidence_gate(submission, ["MUST NOT appear"])
+    submission = VerdictSubmission(
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, invented], draft_reply="d"
+    )
+    gate = check_evidence_gate(submission, ALL_OBS)
     assert not gate.passed
     assert gate.ungrounded_quotes == ["this text was never returned by a tool"]
 
 
 def test_gate_passes_a_well_supported_bug():
-    outputs = ["MUST NOT appear", "STMT_EXCLUDE_DROPPED_AUTHS = true", "4 DROPPED ATM records"]
     submission = VerdictSubmission(
-        verdict=Verdict.BUG,
-        rationale="r",
-        evidence=[
-            _evidence(EvidenceKind.SON, "MUST NOT appear"),
-            _evidence(EvidenceKind.CONFIG, "STMT_EXCLUDE_DROPPED_AUTHS = true"),
-            _evidence(EvidenceKind.DATA, "4 DROPPED ATM records"),
-        ],
-        draft_reply="d",
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, CONFIG_EV, DATA_EV], draft_reply="d"
     )
-    gate = check_evidence_gate(submission, outputs)
-    assert gate.passed
+    gate = check_evidence_gate(submission, ALL_OBS)
+    assert gate.passed, gate.failures
     assert gate.son_citations == 1
     assert gate.corroborating_kinds == ["config", "data"]
+
+
+# ------------------------------------------- citations must match their source
+
+
+def test_a_config_quote_from_the_wrong_parameter_is_rejected():
+    """The hole this closes.
+
+    Both lookups are real and both quotes are real: every word of the citation
+    appeared in some tool result during the run. But the text is from the
+    dropped-auth lookup, while the citation attributes it to the cycle anchor day,
+    whose value is 15. Checking a quote against every result the run has seen calls
+    that grounded. Checking it against the result its ref names does not.
+    """
+    misattributed = _evidence(EvidenceKind.CONFIG, "STMT_CYCLE_ANCHOR_DAY", '"value": "true"')
+    submission = VerdictSubmission(
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, misattributed], draft_reply="d"
+    )
+    gate = check_evidence_gate(submission, ALL_OBS)
+
+    assert not gate.passed
+    assert any("STMT_CYCLE_ANCHOR_DAY" in failure for failure in gate.failures)
+    assert is_grounded('"value": "true"', [obs.text for obs in ALL_OBS]), (
+        "the quote really is somewhere in the run, which is why the old check passed it"
+    )
+
+
+def test_a_quote_attributed_to_the_wrong_kind_of_source_is_rejected():
+    """An authorisation count dressed up as a specification requirement."""
+    dressed_up = _evidence(EvidenceKind.SON, "SON-001#3.2", '"DROPPED": 4')
+    submission = VerdictSubmission(
+        verdict=Verdict.BUG, rationale="r", evidence=[dressed_up, CONFIG_EV], draft_reply="d"
+    )
+    assert not check_evidence_gate(submission, ALL_OBS).passed
+
+
+def test_a_citation_from_a_tool_the_run_never_called_is_rejected():
+    submission = VerdictSubmission(
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, CONFIG_EV], draft_reply="d"
+    )
+    gate = check_evidence_gate(submission, [SON_OBS])
+    assert not gate.passed
+    assert any("never called get_config_param" in failure for failure in gate.failures)
+
+
+def test_a_sub_clause_of_the_retrieved_chunk_counts():
+    """Retrieval returns 3.2; citing the 3.2.1 it rested on is a better citation."""
+    precise = _evidence(EvidenceKind.SON, "SON-001#3.2.1", "MUST NOT appear as statement lines")
+    assert check_citation(precise, [SON_OBS]) is None
+
+    elsewhere = _evidence(EvidenceKind.SON, "SON-002#5", "MUST NOT appear as statement lines")
+    assert check_citation(elsewhere, [SON_OBS]) is not None
+
+
+def test_a_code_citation_must_name_a_file_that_was_actually_read():
+    real = _evidence(
+        EvidenceKind.CODE, "data/code/custom/nwb_statement_builder.py:L15-47", "exclude_expired = y"
+    )
+    assert check_citation(real, [CODE_OBS]) is None
+
+    wrong_file = _evidence(
+        EvidenceKind.CODE, "data/code/core/fee_engine.py:L13-29", "exclude_expired = y"
+    )
+    assert check_citation(wrong_file, [CODE_OBS]) is not None
+
+
+def test_an_absent_parameter_can_still_be_cited():
+    """A parameter that does not exist is the evidence for CR, so it must be citable."""
+    absent = ToolObservation.of(
+        "get_config_param",
+        {
+            "status": "not_found",
+            "query": "FEE_WAIVER_SENIOR_TIER_ENABLED",
+            "note": "No configuration parameter of that name exists for NWB.",
+        },
+        '{"status": "not_found", "query": "FEE_WAIVER_SENIOR_TIER_ENABLED", '
+        '"note": "No configuration parameter of that name exists for NWB."}',
+    )
+    citation = _evidence(
+        EvidenceKind.CONFIG, "FEE_WAIVER_SENIOR_TIER_ENABLED", '"status": "not_found"'
+    )
+    assert check_citation(citation, [absent]) is None
 
 
 def test_needs_info_requires_a_question():
@@ -334,32 +445,20 @@ def test_needs_info_requires_a_question():
 
 def test_the_model_cannot_report_its_own_confidence():
     with pytest.raises(ValueError):
-        VerdictSubmission(
-            verdict=Verdict.BUG, rationale="r", draft_reply="d", confidence=0.99
-        )
+        VerdictSubmission(verdict=Verdict.BUG, rationale="r", draft_reply="d", confidence=0.99)
 
 
 def test_confidence_rewards_breadth_and_punishes_a_forced_stop():
-    outputs = ["a", "b", "c"]
     broad = VerdictSubmission(
-        verdict=Verdict.BUG,
-        rationale="r",
-        evidence=[
-            _evidence(EvidenceKind.SON, "a"),
-            _evidence(EvidenceKind.CONFIG, "b"),
-            _evidence(EvidenceKind.DATA, "c"),
-        ],
-        draft_reply="d",
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, CONFIG_EV, DATA_EV], draft_reply="d"
     )
     narrow = VerdictSubmission(
-        verdict=Verdict.BUG,
-        rationale="r",
-        evidence=[_evidence(EvidenceKind.SON, "a"), _evidence(EvidenceKind.CONFIG, "b")],
-        draft_reply="d",
+        verdict=Verdict.BUG, rationale="r", evidence=[SON_EV, CONFIG_EV], draft_reply="d"
     )
 
-    broad_gate = check_evidence_gate(broad, outputs)
-    narrow_gate = check_evidence_gate(narrow, outputs)
+    broad_gate = check_evidence_gate(broad, ALL_OBS)
+    narrow_gate = check_evidence_gate(narrow, ALL_OBS)
+    assert broad_gate.passed and narrow_gate.passed
 
     clean = compute_confidence(Verdict.BUG, broad_gate, StopReason.VERDICT)
     thinner = compute_confidence(Verdict.BUG, narrow_gate, StopReason.VERDICT)

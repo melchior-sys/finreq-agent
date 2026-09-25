@@ -220,13 +220,22 @@ CREATE TABLE son_chunks (
     chunk_id    TEXT PRIMARY KEY,          -- e.g. 'SON-001#3.2'
     son_id      TEXT NOT NULL REFERENCES son_docs(son_id),
     section     TEXT NOT NULL,             -- e.g. '3.2'
-    heading     TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    token_count INTEGER NOT NULL,
-    embedding   BLOB
+    heading     TEXT NOT NULL,             -- e.g. '3.2 Exclusion of non-settling authorisations'
+    breadcrumb  TEXT NOT NULL,             -- document and ancestor headings, prepended before embedding
+    text        TEXT NOT NULL,             -- section body, verbatim, so quotes of it can be grounded
+    token_count INTEGER NOT NULL,          -- estimate: words * 1.3
+    embedding   BLOB                       -- float32 little-endian, L2 normalised
 );
 
 CREATE INDEX idx_chunks_son ON son_chunks (son_id);
+
+-- Index provenance: which model and which corpus produced the vectors currently stored.
+-- Lets a reindex be a no-op when nothing changed, and forces one when the model changes.
+
+CREATE TABLE index_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 -- ----------------------------------------------------------- code_snippets
 --

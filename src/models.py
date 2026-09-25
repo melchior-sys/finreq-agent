@@ -49,6 +49,7 @@ class EvidenceKind(str, Enum):
 
 class StopReason(str, Enum):
     VERDICT = "verdict"                      # the agent called submit_verdict and it passed the gate
+    GATE_EXHAUSTED = "gate_exhausted"         # it submitted, but never with evidence that held up
     STEP_BUDGET = "step_budget"
     TOOL_ERROR_BUDGET = "tool_error_budget"
     NO_PROGRESS = "no_progress"
@@ -101,17 +102,29 @@ def json_unescape(text: str) -> str:
     return decoded if isinstance(decoded, str) else text
 
 
+_JSON_PUNCTUATION_SPACING = re.compile(r"\s*([{}\[\],:])\s*")
+
+
 def normalise_for_match(text: str) -> str:
     """Fold a string to the form used for substring comparison.
 
     JSON unescape, NFKC normalise, fold curly quotes and dashes to ASCII, collapse
-    all runs of whitespace to a single space, strip. Case is preserved: a quote is
-    meant to be verbatim, and case-folding would let a paraphrase slip through.
+    runs of whitespace, drop whitespace around JSON structural punctuation, strip.
+    Case is preserved: a quote is meant to be verbatim, and case-folding would let a
+    paraphrase slip through.
+
+    The punctuation-spacing rule earns its place. Tool results are pretty-printed
+    JSON, so an aggregate reaches the model as `"by_status": {\\n  "DROPPED": 4` and
+    is naturally quoted back compactly as `"by_status": {"DROPPED": 4`. The content
+    is identical and the difference is two spaces, but a plain substring test calls
+    that an invented quote and rejects a correct verdict. Both sides are folded the
+    same way, so this loosens formatting, never content.
     """
     folded = json_unescape(text)
     folded = unicodedata.normalize("NFKC", folded)
     folded = folded.translate(_CURLY_PUNCTUATION)
     folded = re.sub(r"\s+", " ", folded)
+    folded = _JSON_PUNCTUATION_SPACING.sub(r"\1", folded)
     return folded.strip()
 
 

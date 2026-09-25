@@ -242,6 +242,27 @@ def test_grounding_works_against_a_pretty_printed_tool_result():
     assert is_grounded('config.get_bool("FLAG", default=True)', [payload])
 
 
+def test_grounding_tolerates_json_reformatting_but_not_rewording():
+    """Regression from the first live run.
+
+    A pretty-printed aggregate reaches the model across several lines; the model
+    quotes it back compactly. Identical content, two spaces of difference — and the
+    strict substring test rejected a correct BUG verdict twice over it. Rewording is
+    still caught: the check loosens formatting, never content.
+    """
+    pretty = '''  "aggregates": {
+    "by_status": {
+      "APPROVED": 1,
+      "DROPPED": 4,
+      "SETTLED": 2
+    }
+  }'''
+    assert is_grounded('"by_status": {"APPROVED": 1, "DROPPED": 4, "SETTLED": 2}', [pretty])
+    assert is_grounded('"DROPPED": 4', [pretty])
+    assert not is_grounded('"DROPPED": 5', [pretty])
+    assert not is_grounded('"by_status": {"APPROVED": 1, "DROPPED": 40}', [pretty])
+
+
 def test_grounding_survives_json_escaping_and_rewrapping():
     tool_output = (
         "3.2.1 Authorisations in DROPPED or EXPIRED state MUST NOT appear as statement\n"

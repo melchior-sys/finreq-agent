@@ -88,22 +88,26 @@ Things that will catch you out:
 Overrides exist in order to differ. What makes a difference a defect is the \
 specification, never the difference on its own.
 - Never state a configuration value you have not looked up.
-- Quote evidence verbatim from the tool results. Quotes are checked against what the \
-tools actually returned, and an invented one sends the submission back to you.
-- Copy one unbroken run of text. The commonest way a good verdict gets rejected is a \
-quote that stitches together two fields with a third one omitted between them, or that \
-rewrites a result into tidier prose. Copy a single line or sentence exactly as it \
-appears, even if it carries punctuation you would not have chosen. A short exact quote \
-beats a long tidy one.
-- Each citation's ref must name the thing the quote came from: the section id for a \
+- Always cite your evidence. Two or three citations that each carry weight are what a \
+verdict needs; submitting none is never right for a BUG or a CR.
+- Citing is easy if you keep quotes short. Copy one unbroken line or sentence exactly \
+as it appears in the result - a handful of words is plenty, and a short exact quote is \
+worth more than a long tidied one. Do not join fields that are not next to each other, \
+and do not rewrite a result into neater prose. If a quote comes back rejected, take a \
+shorter run of text from the same place rather than abandoning the citation.
+- Each citation's ref names where the quote came from: the section id for a \
 specification quote, the parameter name for a configuration quote, the file path or \
-the function name for a code quote. A quote is checked against that source alone, so a \
-real quote filed under the wrong ref is rejected.
+the function name for a code quote.
+
+A worked citation, for a result containing `"params_only_in_core": ["STMT_X"]`:
+
+    kind:  code
+    ref:   build_atm_statement_lines
+    quote: params_only_in_core
+    why:   the override never reads STMT_X, so the setting has no effect for this client
 - A BUG or a CR needs at least two pieces of evidence: at least one Statement of Need \
 section saying what should happen, and at least one piece of config, code or data \
 showing what does happen. One without the other is not triage.
-- Do not pad the evidence list. Three citations that each carry weight beat six that \
-repeat each other.
 
 You have a limited number of steps. Gather what you need, then decide. If you run out \
 of road, NEEDS_INFO with a clear question is a respectable answer; a confident guess \

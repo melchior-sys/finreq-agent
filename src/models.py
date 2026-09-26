@@ -278,12 +278,22 @@ def _ref_identifies(kind: EvidenceKind, ref: str, observation: ToolObservation) 
         # The most important finding this tool produces - params_only_in_core - is a
         # property of the comparison, not of either file, so a citation of it has no
         # path to name. Accepting the function name keeps that finding citable.
-        if ref and ref == str(result.get("function", "")):
+        function = str(result.get("function", ""))
+        # The leading identifier, so "build_atm_statement_lines/NWB custom" and
+        # "build_atm_statement_lines (custom)" both resolve to the function.
+        head = re.split(r"[^\w.]", ref, maxsplit=1)[0]
+        if function and (ref == function or head == function):
             return True
+
         path = ref.split(":", 1)[0].replace("\\", "/").strip()
         layers = [result.get("core") or {}, result.get("custom") or {}]
-        known = {str(layer.get("path", "")).replace("\\", "/") for layer in layers}
-        return bool(path) and path in known - {""}
+        known = {str(layer.get("path", "")).replace("\\", "/") for layer in layers} - {""}
+        # A bare filename identifies the file just as unambiguously as the full path
+        # here, and models cite it that way constantly. Requiring the full path
+        # rejected an otherwise perfect citation of the key scenario.
+        return bool(path) and (
+            path in known or path in {p.rsplit("/", 1)[-1] for p in known}
+        )
 
     return True  # data: the ref is a free-text description of a filter
 
@@ -412,7 +422,13 @@ def check_evidence_gate(
     ungrounded = [e.quote for e, problem in citation_failures if problem is not None]
 
     if submission.verdict in (Verdict.BUG, Verdict.CR):
-        if len(submission.evidence) < MIN_EVIDENCE_FOR_DECISION:
+        if not submission.evidence:
+            failures.append(
+                f"You submitted a {submission.verdict.value} verdict with no evidence at all. "
+                "Cite the specification section you relied on and the config, code or data "
+                "that shows what the system does. Keep each quote to one short exact line."
+            )
+        elif len(submission.evidence) < MIN_EVIDENCE_FOR_DECISION:
             failures.append(
                 f"{submission.verdict.value} needs at least {MIN_EVIDENCE_FOR_DECISION} "
                 f"evidence items, got {len(submission.evidence)}."

@@ -187,6 +187,11 @@ GET_AUTH_RECORDS_SCHEMA = {
 
 SUBMIT_VERDICT_SCHEMA = {
     "name": "submit_verdict",
+    # Strict tool use: the API validates the input against this schema before the
+    # call reaches us, so `evidence` cannot simply be omitted. Prose asking for it
+    # was not enough - the model announced it was citing four sources and then sent
+    # arguments with no evidence key at all, twice in a row.
+    "strict": True,
     "description": (
         "Submit the triage decision. This is the only way to finish: the loop does not read "
         "prose conclusions.\n\n"
@@ -207,13 +212,14 @@ SUBMIT_VERDICT_SCHEMA = {
         "type": "object",
         "properties": {
             "verdict": {"type": "string", "enum": ["BUG", "CR", "NEEDS_INFO"]},
-            "rationale": {
-                "type": "string",
-                "description": "Up to five sentences for the internal reviewer, not the client.",
-            },
             "evidence": {
                 "type": "array",
-                "description": "The citations the verdict rests on.",
+                "description": (
+                    "The citations the verdict rests on. Fill this in before writing the "
+                    "rationale - the rationale explains the citations, not the other way "
+                    "round."
+                ),
+                "minItems": 1,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -241,6 +247,10 @@ SUBMIT_VERDICT_SCHEMA = {
                     "additionalProperties": False,
                 },
             },
+            "rationale": {
+                "type": "string",
+                "description": "Up to five sentences for the internal reviewer, not the client.",
+            },
             "missing_info": {
                 "type": "array",
                 "description": "Specific questions to put to the client. Required for NEEDS_INFO.",
@@ -254,7 +264,7 @@ SUBMIT_VERDICT_SCHEMA = {
                 ),
             },
         },
-        "required": ["verdict", "rationale", "evidence", "draft_reply"],
+        "required": ["verdict", "evidence", "rationale", "missing_info", "draft_reply"],
         "additionalProperties": False,
     },
 }

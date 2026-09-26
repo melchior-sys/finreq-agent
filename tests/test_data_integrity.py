@@ -76,7 +76,7 @@ def test_seed_builds_with_expected_row_counts(conn):
     assert counts["config_params"] >= 11
     assert counts["auth_records"] >= 40
     assert counts["son_docs"] == 3
-    assert counts["code_snippets"] == 6
+    assert counts["code_snippets"] == 10
 
 
 def test_son_documents_referenced_by_the_database_exist_on_disk(conn):
@@ -138,6 +138,69 @@ def test_custom_statement_builder_ignores_the_dropped_auth_parameter(conn, known
     # would report it as read when it is only mentioned.
     custom_file = (PROJECT_ROOT / rows["custom"]["path"]).read_text(encoding="utf-8")
     assert "STMT_EXCLUDE_DROPPED_AUTHS" not in custom_file
+
+
+def test_pagination_override_hardcodes_a_configurable_page_size(conn, known_params):
+    """Second defect: same comparison shape as the first, different root cause.
+
+    The platform reads the rows-per-page setting; the override writes 50 into the
+    code. `params_only_in_core` looks identical to the dropped-auth defect, but the
+    fix is not "read the parameter" - it is "stop hardcoding", and the snippet is
+    where that shows.
+    """
+    rows = {
+        row["layer"]: row
+        for row in conn.execute("SELECT * FROM code_snippets WHERE function_name = 'paginate_lines'")
+    }
+    core = params_read_in_range(
+        rows["core"]["path"], rows["core"]["start_line"], rows["core"]["end_line"], known_params
+    )
+    custom_row = rows["custom"]
+    custom = params_read_in_range(
+        custom_row["path"], custom_row["start_line"], custom_row["end_line"], known_params
+    )
+    assert core - custom == {"STMT_MAX_LINES_PER_PAGE"}
+
+    window = "\n".join(
+        (PROJECT_ROOT / custom_row["path"]).read_text(encoding="utf-8").splitlines()
+        [custom_row["start_line"] - 1 : custom_row["end_line"]]
+    )
+    assert "per_page = 50" in window, "the hardcoded value is the defect"
+
+    configured = conn.execute(
+        "SELECT value FROM config_params WHERE client_id = 'NWB' AND name = 'STMT_MAX_LINES_PER_PAGE'"
+    ).fetchone()["value"]
+    assert configured == "45", "the hardcode must contradict the configured value"
+
+
+def test_atm_fee_override_is_off_by_one_with_no_config_involved(conn, known_params):
+    """Third defect: nothing shows up in the comparison headline.
+
+    Neither layer reads a configuration parameter here, so `params_only_in_core` is
+    empty and an agent that only reads that field finds nothing. The defect is a
+    boundary: SON-002 3.3.2 waives the first two withdrawals, the override waives one.
+    """
+    rows = {
+        row["layer"]: row
+        for row in conn.execute(
+            "SELECT * FROM code_snippets WHERE function_name = 'calculate_out_of_network_atm_fee'"
+        )
+    }
+    windows = {}
+    for layer, row in rows.items():
+        assert params_read_in_range(
+            row["path"], row["start_line"], row["end_line"], known_params
+        ) == set(), f"{layer} should read no configuration parameter here"
+        windows[layer] = "\n".join(
+            (PROJECT_ROOT / row["path"]).read_text(encoding="utf-8").splitlines()
+            [row["start_line"] - 1 : row["end_line"]]
+        )
+
+    assert "already_waived < FREE_OUT_OF_NETWORK_WITHDRAWALS" in windows["core"]
+    assert "already_waived < 1" in windows["custom"]
+
+    son = (PROJECT_ROOT / "data/sons/SON-002-fee-schedule-and-waivers.md").read_text(encoding="utf-8")
+    assert "first two qualifying withdrawals" in son, "the rule the override breaks"
 
 
 def test_fee_engine_is_a_decoy_not_a_defect(conn, known_params):

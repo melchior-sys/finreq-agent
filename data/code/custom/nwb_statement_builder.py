@@ -50,3 +50,14 @@ def _nwb_describe(auth: dict[str, Any]) -> str:
     if auth["channel"] == "ATM":
         return f"{LEGACY_ATM_PREFIX} {auth.get('terminal_id', '')}".strip()
     return auth.get("merchant_name", "CARD TRANSACTION")
+
+
+def paginate_lines(lines: list[dict], config: Any) -> list[list[dict]]:
+    """NWB pagination.
+
+    Set to 50 during the 2024 migration to match the legacy print template, which
+    fitted fifty rows to a page. The platform reads the rows-per-page setting from
+    configuration; this override does not.
+    """
+    per_page = 50
+    return [lines[i : i + per_page] for i in range(0, len(lines), per_page)]

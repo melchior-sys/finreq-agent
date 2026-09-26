@@ -263,11 +263,27 @@ VALUES
      'Platform default statement line selection. Honours both SON-001 3.2.2 exclusion flags.'),
     ('NWB', 'custom', 'build_atm_statement_lines',     'data/code/custom/nwb_statement_builder.py', 15, 47, 'python',
      'Northwind Bank override of statement line selection, carried across from SON-001 v2.1.'),
-    (NULL,  'core',   'calculate_monthly_fee_waiver',  'data/code/core/fee_engine.py',              13, 29, 'python',
+    (NULL,  'core',   'calculate_monthly_fee_waiver',  'data/code/core/fee_engine.py',              15, 32, 'python',
      'Platform default maintenance fee waiver evaluation. Average balance condition only.'),
-    ('NWB', 'custom', 'calculate_monthly_fee_waiver',  'data/code/custom/nwb_fee_engine.py',        15, 38, 'python',
+    ('NWB', 'custom', 'calculate_monthly_fee_waiver',  'data/code/custom/nwb_fee_engine.py',        16, 39, 'python',
      'Northwind Bank override adding the SON-002 3.2.1(b) salary credit waiver condition.'),
     (NULL,  'core',   'resolve_statement_cycle_dates', 'data/code/core/cycle_calendar.py',          13, 45, 'python',
      'Platform default cycle date derivation. Weekends only in the non-working-day test.'),
     ('NWB', 'custom', 'resolve_statement_cycle_dates', 'data/code/custom/nwb_cycle_calendar.py',    26, 49, 'python',
-     'Northwind Bank override adding the England and Wales bank holiday calendar to the roll.');
+     'Northwind Bank override adding the England and Wales bank holiday calendar to the roll.'),
+
+    -- Second defect: the override hardcodes a page size the specification says is
+    -- configurable. Same shape as the dropped-auth defect in the comparison output,
+    -- different root cause - a literal in the code rather than a parameter never read.
+    (NULL,  'core',   'paginate_lines',                'data/code/core/statement_builder.py',       64, 68, 'python',
+     'Platform default pagination. Reads the configured rows-per-page value.'),
+    ('NWB', 'custom', 'paginate_lines',                'data/code/custom/nwb_statement_builder.py', 55, 63, 'python',
+     'Northwind Bank override of pagination, carried over from the legacy print template.'),
+
+    -- Third defect: an off-by-one with no configuration involved at all. Nothing shows
+    -- up in params_only_in_core, so a verdict here has to come from reading the code
+    -- against SON-002 3.3.2 rather than from the comparison headline.
+    (NULL,  'core',   'calculate_out_of_network_atm_fee', 'data/code/core/fee_engine.py',           34, 45, 'python',
+     'Platform default out-of-network ATM fee. Waives the first two withdrawals per cycle.'),
+    ('NWB', 'custom', 'calculate_out_of_network_atm_fee', 'data/code/custom/nwb_fee_engine.py',     50, 57, 'python',
+     'Northwind Bank override of the out-of-network ATM fee.');

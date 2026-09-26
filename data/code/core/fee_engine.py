@@ -8,6 +8,8 @@ SYNTHETIC SAMPLE CODE. Not runnable production code.
 from typing import Any
 
 FEE_MAINTENANCE_MINOR = 400
+ATM_FEE_MINOR = 150
+FREE_OUT_OF_NETWORK_WITHDRAWALS = 2
 
 
 def calculate_monthly_fee_waiver(account: dict[str, Any], cycle: dict[str, Any], config: Any) -> dict:
@@ -27,3 +29,17 @@ def calculate_monthly_fee_waiver(account: dict[str, Any], cycle: dict[str, Any],
         return {"waived": True, "reason_code": "AVG_BALANCE_MET", "fee_minor": 0}
 
     return {"waived": False, "reason_code": "NO_WAIVER_CONDITION_MET", "fee_minor": FEE_MAINTENANCE_MINOR}
+
+
+def calculate_out_of_network_atm_fee(withdrawal: dict[str, Any], cycle: dict[str, Any]) -> dict:
+    """Charge the out-of-network ATM fee, waiving the first two of the cycle.
+
+    SON-002 3.3.1  GBP 1.50 per out-of-network ATM withdrawal.
+    SON-002 3.3.2  the first two qualifying withdrawals in a cycle are waived.
+    """
+    already_waived = cycle.get("atm_fee_waivers_used", 0)
+
+    if already_waived < FREE_OUT_OF_NETWORK_WITHDRAWALS:
+        return {"waived": True, "reason_code": "FREE_WITHDRAWAL_ALLOWANCE", "fee_minor": 0}
+
+    return {"waived": False, "reason_code": "ALLOWANCE_EXHAUSTED", "fee_minor": ATM_FEE_MINOR}

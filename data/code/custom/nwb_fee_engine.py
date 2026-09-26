@@ -10,6 +10,7 @@ SYNTHETIC SAMPLE CODE. Not runnable production code.
 from typing import Any
 
 FEE_MAINTENANCE_MINOR = 400
+ATM_FEE_MINOR = 150
 
 
 def calculate_monthly_fee_waiver(account: dict[str, Any], cycle: dict[str, Any], config: Any) -> dict:
@@ -44,3 +45,13 @@ def _best_salary_credit(cycle: dict[str, Any]) -> int:
         if c.get("originator_category") in {"SALARY", "PENSION"}
     ]
     return max(credits, default=0)
+
+
+def calculate_out_of_network_atm_fee(withdrawal: dict[str, Any], cycle: dict[str, Any]) -> dict:
+    """NWB out-of-network ATM fee."""
+    already_waived = cycle.get("atm_fee_waivers_used", 0)
+
+    if already_waived < 1:
+        return {"waived": True, "reason_code": "FREE_WITHDRAWAL_ALLOWANCE", "fee_minor": 0}
+
+    return {"waived": False, "reason_code": "ALLOWANCE_EXHAUSTED", "fee_minor": ATM_FEE_MINOR}

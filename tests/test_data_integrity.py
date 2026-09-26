@@ -486,6 +486,44 @@ def test_a_code_citation_must_name_a_file_that_was_actually_read():
     assert check_citation(wrong_file, [CODE_OBS]) is not None
 
 
+def test_bare_filename_matching_is_exact_not_a_suffix_test():
+    """`nwb_statement_builder.py`.endswith(`statement_builder.py`) is True.
+
+    A suffix or substring test would therefore let a citation of the platform file
+    resolve against the client override and vice versa - and in this corpus those
+    two files are the entire difference between a defect and correct behaviour.
+    Basenames are compared by equality against the set of files the call actually
+    read, never by endswith or `in`.
+    """
+    core_only = ToolObservation.of(
+        "compare_core_vs_custom",
+        {"function": "build_atm_statement_lines",
+         "core": {"path": "data/code/core/statement_builder.py", "snippet": "x = 1"}},
+        '{"core": {"path": "data/code/core/statement_builder.py", "snippet": "x = 1"}}',
+    )
+    custom_only = ToolObservation.of(
+        "compare_core_vs_custom",
+        {"function": "build_atm_statement_lines",
+         "custom": {"path": "data/code/custom/nwb_statement_builder.py", "snippet": "x = 1"}},
+        '{"custom": {"path": "data/code/custom/nwb_statement_builder.py", "snippet": "x = 1"}}',
+    )
+
+    def cited_as(ref: str) -> Evidence:
+        return _evidence(EvidenceKind.CODE, ref, "x = 1")
+
+    # The shorter name must not reach the longer file.
+    assert check_citation(cited_as("statement_builder.py"), [custom_only]) is not None
+    assert check_citation(cited_as("statement_builder.py:L14-51"), [custom_only]) is not None
+    # Nor the longer name the shorter file.
+    assert check_citation(cited_as("nwb_statement_builder.py"), [core_only]) is not None
+    # Each still resolves against its own file, with or without a line range.
+    assert check_citation(cited_as("statement_builder.py"), [core_only]) is None
+    assert check_citation(cited_as("nwb_statement_builder.py:L15-47"), [custom_only]) is None
+    # And a partial name resolves to nothing at all.
+    assert check_citation(cited_as("builder.py"), [core_only, custom_only]) is not None
+    assert check_citation(cited_as("statement_"), [core_only]) is not None
+
+
 def test_an_absent_parameter_can_still_be_cited():
     """A parameter that does not exist is the evidence for CR, so it must be citable."""
     absent = ToolObservation.of(

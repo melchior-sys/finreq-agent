@@ -3,4 +3,3 @@ traces/
 __pycache__/
 .venv/
 *.sqlite
-evals/results/

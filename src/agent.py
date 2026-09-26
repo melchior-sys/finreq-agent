@@ -90,6 +90,15 @@ specification, never the difference on its own.
 - Never state a configuration value you have not looked up.
 - Quote evidence verbatim from the tool results. Quotes are checked against what the \
 tools actually returned, and an invented one sends the submission back to you.
+- Copy one unbroken run of text. The commonest way a good verdict gets rejected is a \
+quote that stitches together two fields with a third one omitted between them, or that \
+rewrites a result into tidier prose. Copy a single line or sentence exactly as it \
+appears, even if it carries punctuation you would not have chosen. A short exact quote \
+beats a long tidy one.
+- Each citation's ref must name the thing the quote came from: the section id for a \
+specification quote, the parameter name for a configuration quote, the file path or \
+the function name for a code quote. A quote is checked against that source alone, so a \
+real quote filed under the wrong ref is rejected.
 - A BUG or a CR needs at least two pieces of evidence: at least one Statement of Need \
 section saying what should happen, and at least one piece of config, code or data \
 showing what does happen. One without the other is not triage.

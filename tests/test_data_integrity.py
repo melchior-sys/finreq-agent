@@ -276,7 +276,10 @@ def test_dropped_atm_authorisations_exist_for_the_complaining_card(conn):
     "raw, expected",
     [
         ("line one\\nline two", "line one line two"),
-        ('he said \\"exclude\\"', 'he said "exclude"'),
+        ('he said \\"exclude\\"', "he said exclude"),
+        ("**Age-based waivers.** Waivers granted", "Age-based waivers. Waivers granted"),
+        ('"value": "true"', "value:true"),
+        ("STMT_EXCLUDE_DROPPED_AUTHS", "STMT_EXCLUDE_DROPPED_AUTHS"),
         ("  spaced   out \n text ", "spaced out text"),
         ("curly ‘quotes’ and — dashes", "curly 'quotes' and - dashes"),
         ("no escapes here", "no escapes here"),

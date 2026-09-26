@@ -103,6 +103,9 @@ def json_unescape(text: str) -> str:
 
 
 _JSON_PUNCTUATION_SPACING = re.compile(r"\s*([{}\[\],:])\s*")
+# Markdown emphasis and JSON string delimiters. Underscores are left alone:
+# they carry meaning inside parameter names like STMT_EXCLUDE_DROPPED_AUTHS.
+_MARKUP_CHARACTERS = re.compile(r'[*"]')
 
 
 def normalise_for_match(text: str) -> str:
@@ -113,16 +116,28 @@ def normalise_for_match(text: str) -> str:
     Case is preserved: a quote is meant to be verbatim, and case-folding would let a
     paraphrase slip through.
 
-    The punctuation-spacing rule earns its place. Tool results are pretty-printed
-    JSON, so an aggregate reaches the model as `"by_status": {\\n  "DROPPED": 4` and
-    is naturally quoted back compactly as `"by_status": {"DROPPED": 4`. The content
-    is identical and the difference is two spaces, but a plain substring test calls
-    that an invented quote and rejects a correct verdict. Both sides are folded the
-    same way, so this loosens formatting, never content.
+    Three folds beyond whitespace, each for a failure seen in a real run, and each
+    dropping *serialisation* rather than content. Both sides are folded identically,
+    so none of them lets a reworded quote through.
+
+    * **Punctuation spacing.** A pretty-printed aggregate reaches the model across
+      several lines and is quoted back compactly. Two spaces of difference.
+    * **Markdown emphasis.** The specifications write `**Age-based waivers.**
+      Waivers granted...`; the model quotes the sentence without the asterisks,
+      which is the same sentence. This was the single largest cause of rejected
+      citations on the first full eval run.
+    * **JSON string delimiters.** The model renders `"value": "true"` as
+      `value: true` when quoting a result back. Dropping quote characters makes
+      those the same token sequence.
+
+    What is deliberately *not* folded away is elision. A quote that stitches
+    together two fields with a third omitted between them is not a quote, and the
+    fix for that belongs in the prompt, not here.
     """
     folded = json_unescape(text)
     folded = unicodedata.normalize("NFKC", folded)
     folded = folded.translate(_CURLY_PUNCTUATION)
+    folded = _MARKUP_CHARACTERS.sub("", folded)
     folded = re.sub(r"\s+", " ", folded)
     folded = _JSON_PUNCTUATION_SPACING.sub(r"\1", folded)
     return folded.strip()
@@ -233,7 +248,10 @@ def _ref_identifies(kind: EvidenceKind, ref: str, observation: ToolObservation) 
     "came from the right tool" — still strictly stronger than the old any-result rule.
     """
     result = observation.result
-    ref = ref.strip()
+    # Models routinely append a gloss: "FEE_WAIVER_SENIOR (not found)" or
+    # "builder.py:L15-47 (compare_core_vs_custom output)". The gloss is commentary,
+    # not part of the identifier.
+    ref = re.sub(r"\s*\([^)]*\)\s*$", "", ref.strip()).strip()
 
     if kind is EvidenceKind.SON:
         # A rule is often cited more precisely than it is chunked: the retriever
@@ -257,6 +275,11 @@ def _ref_identifies(kind: EvidenceKind, ref: str, observation: ToolObservation) 
         return wanted in names - {""}
 
     if kind is EvidenceKind.CODE:
+        # The most important finding this tool produces - params_only_in_core - is a
+        # property of the comparison, not of either file, so a citation of it has no
+        # path to name. Accepting the function name keeps that finding citable.
+        if ref and ref == str(result.get("function", "")):
+            return True
         path = ref.split(":", 1)[0].replace("\\", "/").strip()
         layers = [result.get("core") or {}, result.get("custom") or {}]
         known = {str(layer.get("path", "")).replace("\\", "/") for layer in layers}
@@ -357,7 +380,11 @@ def check_citation(evidence: Evidence, observations: Sequence[ToolObservation]) 
 
     if not any(is_grounded(evidence.quote, [obs.text]) for obs in about_ref):
         excerpt = evidence.quote[:80] + ("..." if len(evidence.quote) > 80 else "")
-        return f"Quote not found in the {expected_tool} result for {evidence.ref!r}: {excerpt!r}"
+        return (
+            f"Quote not found in the {expected_tool} result for {evidence.ref!r}: {excerpt!r}. "
+            "Copy one unbroken run of text straight out of the result - do not join "
+            "fields that are not next to each other, and do not rewrite the formatting."
+        )
 
     return None
 

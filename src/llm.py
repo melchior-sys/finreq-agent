@@ -254,7 +254,10 @@ class AnthropicLLM:
         self._anthropic = anthropic
         # The SDK reads ANTHROPIC_API_KEY from the environment itself. Passing it
         # explicitly would mean holding the secret in a local variable for no gain.
-        self._client = anthropic.Anthropic()
+        # max_retries above the default of 2: an eval arm is sixteen runs of several
+        # calls each, and a transient blip killed the last four cases of the first
+        # full run outright.
+        self._client = anthropic.Anthropic(max_retries=5)
         self.model = model
         self.max_tokens = max_tokens
 

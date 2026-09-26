@@ -143,6 +143,12 @@ def format_summary(summary: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to cp1252, which cannot encode the report's
+    # punctuation. The first full eval run wrote its results file and then
+    # crashed printing them.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Summarise an agent trace.")
     parser.add_argument("trace", nargs="?", help="path to a traces/*.jsonl file; defaults to the newest")
     parser.add_argument("--json", action="store_true", help="emit the summary as JSON")

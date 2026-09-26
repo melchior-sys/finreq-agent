@@ -401,6 +401,12 @@ def format_report(meta: dict, summary: dict, rows: list[dict], retrieval: dict |
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to cp1252, which cannot encode the report's
+    # punctuation. The first full eval run wrote its results file and then
+    # crashed printing them.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", default="fake", help="fake | anthropic | ollama")
     parser.add_argument("--model", default=None)

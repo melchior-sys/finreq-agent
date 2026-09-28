@@ -265,6 +265,8 @@ def case_ticket(case: dict) -> Ticket:
 def run_arm(cases: list[dict], backend: str, mode: str, model: str | None) -> tuple[list[dict], dict]:
     toolbox = StuffedToolbox() if mode == "stuffed" else tools_module.Toolbox()
     rows: list[dict] = []
+    requested_model = getattr(get_client(backend, model=model), "model", "unknown")
+    print(f"requested model: {requested_model}")
 
     for index, case in enumerate(cases, start=1):
         ticket = case_ticket(case)
@@ -289,6 +291,7 @@ def run_arm(cases: list[dict], backend: str, mode: str, model: str | None) -> tu
         wall_ms = int((time.perf_counter() - started) * 1000)
         summary = summarise(Path(DEFAULT_TRACE_DIR) / f"{result.trace_id}.jsonl")
         row = score_case(case, result, summary, wall_ms)
+        row["served_model"] = summary.get("served_model")
         rows.append(row)
 
         mark = "ok " if row["correct"] else "XX "
@@ -309,7 +312,10 @@ def format_report(meta: dict, summary: dict, rows: list[dict], retrieval: dict |
     lines = [
         f"# Eval run — {meta['backend']} / {meta['mode']}",
         "",
-        f"_{meta['timestamp']} · model `{meta['model']}` · {summary['cases']} cases_",
+        f"_{meta['timestamp']} · {summary['cases']} cases_",
+        "",
+        f"Model requested: `{meta['model_requested']}` · "
+        f"served by: {', '.join(f'`{m}`' for m in meta['model_served']) or '`unknown`'}",
         "",
         "## Headline",
         "",
@@ -424,13 +430,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(cases)} cases · backend {args.backend} · mode {args.mode}\n")
 
     rows, summary = run_arm(cases, args.backend, args.mode, args.model)
+    requested_model = getattr(get_client(args.backend, model=args.model), "model", "unknown")
+    served = sorted({r.get("served_model") for r in rows if r.get("served_model")})
     retrieval = None if args.no_retrieval_report or args.mode == "stuffed" else retrieval_report()
 
     meta = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "backend": args.backend,
         "mode": args.mode,
-        "model": args.model or "(backend default)",
+        "model_requested": requested_model,
+        "model_served": served,
     }
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")

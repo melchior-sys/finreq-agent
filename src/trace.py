@@ -88,6 +88,12 @@ def summarise(path: Path | str) -> dict[str, Any]:
         "ticket_id": started.get("ticket_id"),
         "backend": started.get("backend"),
         "model": started.get("model"),
+        # What the API answered with. Asking for an alias like claude-haiku-4-5 gets
+        # a dated snapshot back, and that is the thing a result is reproducible
+        # against, so it belongs in the record rather than the alias alone.
+        "served_model": next(
+            (c.get("model") for c in reversed(llm_calls) if c.get("model")), None
+        ),
         "tool_sequence": [payload["tool"] for payload in by_type.get("tool_call", [])],
         "llm_calls": len(llm_calls),
         "steps_used": finished.get("steps_used"),

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,15 @@ def text_turn(text: str) -> LLMResponse:
     return LLMResponse(
         text=text, tool_calls=[], stop_reason="end_turn", model="fake-model",
         usage=Usage(input_tokens=100, output_tokens=20), latency_ms=5,
+    )
+
+
+def slow_turn(seconds: float) -> LLMResponse:
+    """A turn that claims to take `seconds`. FakeLLM raises if that exceeds the
+    budget it was handed, so the test never actually waits."""
+    return LLMResponse(
+        text="", tool_calls=[], stop_reason="end_turn", model="fake-model",
+        usage=Usage(), latency_ms=0, simulated_seconds=seconds,
     )
 
 
@@ -325,6 +335,87 @@ def test_every_run_returns_a_verdict_even_when_the_model_will_not(ticket, tmp_pa
     assert result.verdict is Verdict.NEEDS_INFO
     assert result.missing_info
     assert result.confidence < 0.4, "nothing was checked, so the score must be low"
+
+
+# ------------------------------------------------------------ wall clock
+
+
+def test_a_call_that_outlives_the_budget_ends_the_run(ticket, tmp_path):
+    """The bug this closes: the guard only looked at the clock between steps, so a
+    single long call ran 801s against a 90s limit on EV-004 of the first full eval."""
+    llm = FakeLLM([slow_turn(999.0)])
+    started = time.perf_counter()
+    result = build(llm, tmp_path, wall_clock_seconds=2.0).run(ticket)
+    elapsed = time.perf_counter() - started
+
+    assert result.stop_reason is StopReason.TIMEOUT
+    assert result.verdict is Verdict.NEEDS_INFO
+    assert elapsed < 2.0, f"the run itself took {elapsed:.1f}s, so nothing was bounded"
+
+
+def test_every_call_is_given_the_time_that_is_actually_left(ticket, tmp_path):
+    """A fixed per-call timeout would still let several slow calls overrun together.
+    Each call gets what remains, so the budget shrinks as the run spends it."""
+    llm = FakeLLM([
+        tool_turn(("search_son", {"query": "a"})),
+        tool_turn(("get_config_param", {"name": "b"})),
+        verdict_turn("BUG", SON_AND_CONFIG),
+    ])
+    build(llm, tmp_path, wall_clock_seconds=30.0).run(ticket)
+
+    budgets = [r["timeout"] for r in llm.requests]
+    assert all(b is not None for b in budgets), "every call must carry a budget"
+    assert all(b <= 30.0 for b in budgets)
+    assert budgets == sorted(budgets, reverse=True), f"budget must shrink, got {budgets}"
+
+
+def test_a_timeout_does_not_spend_another_call_closing_out(ticket, tmp_path):
+    """Forcing a closing verdict costs a call, and a run that has run out of time
+    cannot afford one. The verdict is assembled locally instead."""
+    llm = FakeLLM([slow_turn(999.0)])
+    result = build(llm, tmp_path, wall_clock_seconds=2.0).run(ticket)
+
+    assert len(llm.requests) == 1, "the forced finish must not ask the model again"
+    assert result.missing_info
+
+
+def test_a_timeout_keeps_the_evidence_already_gathered(ticket, tmp_path):
+    """A verdict submitted before the clock ran out is not thrown away; it is
+    downgraded to NEEDS_INFO with its grounded citations intact."""
+    llm = FakeLLM([
+        tool_turn(("search_son", {"query": "dropped"}), ("get_config_param", {"name": "x"})),
+        verdict_turn("BUG", [SON_CITE]),   # thin: rejected by the gate
+        slow_turn(999.0),                  # then the clock runs out
+    ])
+    result = build(llm, tmp_path, wall_clock_seconds=2.0).run(ticket)
+
+    assert result.stop_reason is StopReason.TIMEOUT
+    assert result.verdict is Verdict.NEEDS_INFO
+    assert [e.quote for e in result.evidence] == [SON_CITE["quote"]]
+
+
+def test_the_timeout_is_attributable_in_the_trace(ticket, tmp_path):
+    llm = FakeLLM([slow_turn(999.0)])
+    result = build(llm, tmp_path, wall_clock_seconds=2.0).run(ticket)
+    events = read_events(tmp_path / f"{result.trace_id}.jsonl")
+
+    assert any(e["type"] == "llm_timeout" for e in events)
+    guards = [e["payload"]["guard"] for e in events if e["type"] == "guard_tripped"]
+    assert "timeout" in guards
+    assert [e["payload"]["budget_s"] for e in events if e["type"] == "llm_request"] == [2.0]
+
+
+def test_a_call_inside_the_budget_is_untouched(ticket, tmp_path):
+    """The guard must not fire on a call that is merely slowish."""
+    quick = LLMResponse(
+        text="", tool_calls=[ToolCall(id="c0", name="search_son", arguments={"query": "a"})],
+        stop_reason="tool_use", model="fake-model", usage=Usage(),
+        latency_ms=0, simulated_seconds=1.0,
+    )
+    llm = FakeLLM([quick, verdict_turn("NEEDS_INFO", [], missing_info=["q"])])
+    result = build(llm, tmp_path, wall_clock_seconds=30.0).run(ticket)
+
+    assert result.stop_reason is StopReason.VERDICT
 
 
 # -------------------------------------------------------------------- traces

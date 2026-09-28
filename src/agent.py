@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pydantic import ValidationError  # noqa: E402
 
 from src import tools as tools_module  # noqa: E402
-from src.llm import LLMError, LLMResponse, ToolCall, estimate_cost_usd  # noqa: E402
+from src.llm import LLMError, LLMResponse, LLMTimeout, ToolCall, estimate_cost_usd  # noqa: E402
 from src.models import (  # noqa: E402
     EvidenceGateReport,
     StopReason,
@@ -183,7 +183,15 @@ class TriageAgent:
                 )
 
             try:
-                response = self._call_llm(messages, tracer, step)
+                response = self._call_llm(messages, tracer, step, budget=self._remaining(started))
+            except LLMTimeout as exc:
+                # Out of time, so there is nothing left to spend asking the model to
+                # close out. The verdict is built from whatever it already submitted.
+                tracer.event("llm_timeout", step=step, detail=str(exc))
+                return self._forced_finish(
+                    ticket, messages, tracer, state, StopReason.TIMEOUT, started,
+                    detail=str(exc), ask_model=False,
+                )
             except LLMError as exc:
                 tracer.event("guard_tripped", guard="llm_error", detail=str(exc))
                 tracer.event("run_finished", steps_used=step, stop_reason="llm_error",
@@ -248,16 +256,22 @@ class TriageAgent:
 
     # -- pieces -----------------------------------------------------------
 
+    def _remaining(self, started: float) -> float:
+        """Wall-clock budget left for this run, never negative."""
+        return max(0.0, self.config.wall_clock_seconds - (time.perf_counter() - started))
+
     def _call_llm(
         self, messages: list[dict[str, Any]], tracer: Tracer, step: int,
-        tool_choice: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | None = None, budget: float | None = None,
     ) -> LLMResponse:
-        tracer.event("llm_request", step=step, messages=len(messages), tool_choice=tool_choice)
+        tracer.event("llm_request", step=step, messages=len(messages),
+                     tool_choice=tool_choice, budget_s=None if budget is None else round(budget, 1))
         response = self.llm.complete(
             system=SYSTEM_PROMPT,
             messages=messages,
             tools=tools_module.ALL_TOOL_SCHEMAS,
             tool_choice=tool_choice,
+            timeout=budget,
         )
         tracer.event(
             "llm_response",
@@ -365,6 +379,7 @@ class TriageAgent:
         *,
         detail: str,
         pending: list[dict[str, Any]] | None = None,
+        ask_model: bool = True,
     ) -> TriageResult:
         """Make one last call with submit_verdict forced, so every run returns a verdict.
 
@@ -386,16 +401,19 @@ class TriageAgent:
             }],
         })
 
-        try:
-            response = self._call_llm(
-                messages, tracer, state.steps,
-                tool_choice={"type": "tool", "name": SUBMIT_VERDICT},
-            )
-            call = next((c for c in response.tool_calls if c.name == SUBMIT_VERDICT), None)
-            submission = VerdictSubmission.model_validate(call.arguments) if call else None
-        except (LLMError, ValidationError, AttributeError) as exc:
-            tracer.event("guard_tripped", guard="forced_finish_failed", detail=str(exc))
-            submission = None
+        submission = None
+        if ask_model:
+            try:
+                response = self._call_llm(
+                    messages, tracer, state.steps,
+                    tool_choice={"type": "tool", "name": SUBMIT_VERDICT},
+                    budget=self._remaining(started),
+                )
+                call = next((c for c in response.tool_calls if c.name == SUBMIT_VERDICT), None)
+                submission = VerdictSubmission.model_validate(call.arguments) if call else None
+            except (LLMError, ValidationError, AttributeError) as exc:
+                tracer.event("guard_tripped", guard="forced_finish_failed", detail=str(exc))
+                submission = None
 
         if submission is None:
             submission = state.submission

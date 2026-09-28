@@ -41,6 +41,13 @@ OLLAMA_BASE_URL = "http://localhost:11434/v1"
 # billed - so it is set well clear of the ceiling rather than tuned down.
 MAX_TOKENS = 16000
 
+# Retry budget for a transient blip, and the shortest slice of the wall-clock
+# budget worth giving one attempt. Observed Haiku turns land around 5-15s, so a
+# 20s floor leaves headroom without letting the retry count dilute the budget
+# into slices too short to ever succeed.
+MAX_RETRIES = 5
+MIN_ATTEMPT_SECONDS = 20.0
+
 # USD per million tokens. Cache reads bill at ~0.1x input, writes at ~1.25x.
 # Used only to report what a run cost; a model missing here reports cost as None
 # rather than guessing.
@@ -148,6 +155,10 @@ class LLMResponse:
     """The assistant turn exactly as the provider returned it, for replay in the
     next request. Anthropic requires tool_use blocks be echoed back unchanged."""
 
+    simulated_seconds: float = 0.0
+    """How long this call pretends to take. Honoured by FakeLLM only, so the
+    timeout path can be tested without a test that actually waits."""
+
 
 def resolve_pricing(model: str) -> dict[str, float] | None:
     """Find the rate card for a model id.
@@ -185,6 +196,15 @@ class LLMError(RuntimeError):
     """A backend failed in a way the agent loop cannot recover from."""
 
 
+class LLMTimeout(LLMError):
+    """The call did not finish inside the wall-clock budget it was given.
+
+    Distinct from LLMError because it means something different to the loop: not
+    "this backend is broken" but "the run is out of time", which ends the run on
+    StopReason.TIMEOUT rather than propagating.
+    """
+
+
 class FakeLLM:
     """A scripted backend for tests.
 
@@ -212,10 +232,12 @@ class FakeLLM:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> LLMResponse:
         self.requests.append(
             {
                 "system": system,
+                "timeout": timeout,
                 # A copy: the agent appends to the live list as the run continues, so
                 # holding the reference would make every recorded request look like
                 # the last one.
@@ -226,7 +248,16 @@ class FakeLLM:
         )
         if not self.scripted:
             raise LLMError("FakeLLM ran out of scripted responses")
-        return self.scripted.pop(0)
+        response = self.scripted.pop(0)
+
+        # A scripted response can claim to be slower than the budget allows. The
+        # test never waits for it: what matters is that the loop is told the call
+        # did not finish in time, which is exactly what a real timeout looks like.
+        if timeout is not None and response.simulated_seconds > timeout:
+            raise LLMTimeout(
+                f"fake call would take {response.simulated_seconds}s, budget was {timeout:.1f}s"
+            )
+        return response
 
 
 class AnthropicLLM:
@@ -257,7 +288,7 @@ class AnthropicLLM:
         # max_retries above the default of 2: an eval arm is sixteen runs of several
         # calls each, and a transient blip killed the last four cases of the first
         # full run outright.
-        self._client = anthropic.Anthropic(max_retries=5)
+        self._client = anthropic.Anthropic(max_retries=MAX_RETRIES)
         self.model = model
         self.max_tokens = max_tokens
 
@@ -268,6 +299,7 @@ class AnthropicLLM:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -279,9 +311,23 @@ class AnthropicLLM:
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
 
+        client = self._client
+        if timeout is not None:
+            # The SDK retries timeouts, so a per-request timeout on its own bounds
+            # one attempt and not the call: worst case is timeout x (retries + 1).
+            # Splitting the budget across the attempts makes the product the bound.
+            attempts = max(1, min(MAX_RETRIES + 1, int(timeout // MIN_ATTEMPT_SECONDS)))
+            client = self._client.with_options(
+                timeout=timeout / attempts, max_retries=attempts - 1
+            )
+
         started = time.perf_counter()
         try:
-            response = self._client.messages.create(**kwargs)
+            response = client.messages.create(**kwargs)
+        # APITimeoutError subclasses APIConnectionError, so it has to be caught first
+        # or a timeout is reported as an unreachable API.
+        except self._anthropic.APITimeoutError as exc:
+            raise LLMTimeout(f"call exceeded its {timeout:.1f}s slice of the budget: {exc}") from exc
         except self._anthropic.NotFoundError as exc:
             raise LLMError(f"model {self.model!r} not found: {exc}") from exc
         except self._anthropic.RateLimitError as exc:
@@ -349,6 +395,7 @@ class OllamaLLM:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> LLMResponse:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -375,9 +422,13 @@ class OllamaLLM:
         )
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(request, timeout=300) as response:
+            with urllib.request.urlopen(request, timeout=timeout or 300) as response:
                 body = json.loads(response.read().decode("utf-8"))
+        except TimeoutError as exc:
+            raise LLMTimeout(f"ollama call exceeded {timeout}s: {exc}") from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
+            if isinstance(getattr(exc, "reason", None), TimeoutError):
+                raise LLMTimeout(f"ollama call exceeded {timeout}s: {exc}") from exc
             raise LLMError(f"ollama request failed: {exc}") from exc
         latency_ms = int((time.perf_counter() - started) * 1000)
 
